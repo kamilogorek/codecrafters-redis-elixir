@@ -26,13 +26,8 @@ defmodule Server do
 
   def accept_connection(socket) do
     {:ok, client} = :gen_tcp.accept(socket)
-    receive_packet(client)
-
-    # {:ok, pid} =
-    #   Task.Supervisor.start_child(Server.TaskSupervisor, fn -> receive_packet(client, config) end)
-
-    # :ok = :gen_tcp.controlling_process(client, pid)
-    # accept_connection(socket, config)
+    Supervisor.start_link([{Task, fn -> receive_packet(client) end}], strategy: :one_for_one)
+    accept_connection(socket)
   end
 
   def receive_packet(client) do
