@@ -46,4 +46,59 @@ defmodule Redis.Server do
     IO.inspect("Responding to ECHO: #{value}")
     :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
   end
+
+  def respond_to_command(client, "GET", args) do
+    [{:bulk_string, key}] = args
+    item = Redis.State.get(key)
+
+    if item == nil do
+      :gen_tcp.send(client, "$-1\r\n")
+    else
+      :gen_tcp.send(client, Redis.Protocol.to_bulk_string(item))
+    end
+
+    # TODO: Rework this monstrosity
+    # if item == nil do
+    #   :gen_tcp.send(client, "$-1\r\n")
+    # else
+    #   {value, expiry} = item
+
+    #   if expiry == nil do
+    #     :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+    #   else
+    #     if :os.system_time(:millisecond) > expiry do
+    #       Redis.State.delete(key)
+    #       :gen_tcp.send(client, "$-1\r\n")
+    #     else
+    #       :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+    #     end
+    #   end
+    # end
+  end
+
+  def respond_to_command(client, "SET", args) do
+    [key_command, value_command] = args
+    # [key_command, value_command | options] = args
+
+    key = elem(key_command, 1)
+    value = elem(value_command, 1)
+
+    # entry =
+    #   case options do
+    #     [{:bulk_string, "px"}, {:bulk_string, expiry}] ->
+    #       {expiry, _} = Integer.parse(expiry)
+    #       {value, :os.system_time(:millisecond) + expiry}
+
+    #     _ ->
+    #       {value, nil}
+    #   end
+
+    Redis.State.set(key, value)
+    # Redis.State.set(key, {value, nil})
+    :gen_tcp.send(client, Redis.Protocol.to_simple_string("OK"))
+  end
+
+  def respond_to_command(_client, command, _args) do
+    IO.puts("Unknown command #{command}")
+  end
 end
