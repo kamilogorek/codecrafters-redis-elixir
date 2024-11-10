@@ -1,5 +1,4 @@
 defmodule App.MixProject do
-  # NOTE: You do not need to change anything in this file.
   use Mix.Project
 
   def project do
@@ -14,7 +13,7 @@ defmodule App.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {Server, []}
+      mod: {Redis, []}
     ]
   end
 end

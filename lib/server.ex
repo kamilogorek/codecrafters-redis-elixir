@@ -1,16 +1,4 @@
-# watchexec -w lib -r --stop-signal SIGKILL mix run --no-halt
-
-defmodule Server do
-  @moduledoc """
-  Your implementation of a Redis server
-  """
-
-  use Application
-
-  def start(_type, _args) do
-    Supervisor.start_link([{Task, fn -> Server.listen() end}], strategy: :one_for_one)
-  end
-
+defmodule Redis.Server do
   @doc """
   Listen for incoming connections
   """
@@ -26,6 +14,7 @@ defmodule Server do
 
   def accept_connection(socket) do
     {:ok, client} = :gen_tcp.accept(socket)
+    # TODO: Use `Task.Supervisor.start_child` instead
     Supervisor.start_link([{Task, fn -> receive_packet(client) end}], strategy: :one_for_one)
     accept_connection(socket)
   end
@@ -34,7 +23,9 @@ defmodule Server do
     case :gen_tcp.recv(client, 0) do
       {:ok, data} ->
         IO.inspect("Data: #{data}")
-        :gen_tcp.send(client, "+PONG\r\n")
+        [{_, command} | args] = Redis.Protocol.parse(data)
+        IO.inspect("Command: #{command}")
+        respond_to_command(client, String.upcase(command), args)
         receive_packet(client)
 
       {:error, :closed} ->
@@ -43,5 +34,16 @@ defmodule Server do
       {:error, reason} ->
         IO.puts("TCP connection failed: #{reason}")
     end
+  end
+
+  def respond_to_command(client, "PING", _args) do
+    IO.inspect("Responding to PING")
+    :gen_tcp.send(client, Redis.Protocol.to_simple_string("PONG"))
+  end
+
+  def respond_to_command(client, "ECHO", args) do
+    [{:bulk_string, value}] = args
+    IO.inspect("Responding to ECHO: #{value}")
+    :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
   end
 end
