@@ -1,6 +1,5 @@
 defmodule Redis.Server do
   def listen() do
-    IO.puts("Logs from your program will appear here!")
     {:ok, socket} = :gen_tcp.listen(6379, [:binary, active: false, reuseaddr: true])
     accept_connection(socket)
   end
@@ -80,6 +79,26 @@ defmodule Redis.Server do
 
     Redis.State.set(key, entry)
     :gen_tcp.send(client, Redis.Protocol.to_simple_string("OK"))
+  end
+
+  def respond_to_command(client, "CONFIG", args) do
+    [{:bulk_string, subcommand}, {:bulk_string, key}] = args
+
+    case String.upcase(subcommand) do
+      "GET" ->
+        case :ets.lookup(:server_config, key) do
+          [{_, value} | _] ->
+            :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array([key, value]))
+
+          [] ->
+            err = "No config available for key #{key}"
+            IO.puts(err)
+            :gen_tcp.send(client, Redis.Protocol.to_simple_error(err))
+        end
+
+      _ ->
+        IO.puts("Unknown CONFIG subcommand #{subcommand}")
+    end
   end
 
   def respond_to_command(_client, command, _args) do

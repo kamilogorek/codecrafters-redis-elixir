@@ -31,6 +31,14 @@ defmodule Redis.Protocol do
     {{:array, length}, args}
   end
 
+  def to_simple_error(value) do
+    if value == "" do
+      raise ArgumentError, message: "simple_error does not support empty strings"
+    end
+
+    "-#{value}\r\n"
+  end
+
   def to_simple_string(value) do
     if value == "" do
       raise ArgumentError, message: "simple_string does not support empty strings"

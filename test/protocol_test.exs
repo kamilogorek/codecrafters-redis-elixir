@@ -1,8 +1,15 @@
 defmodule ProtocolTest do
   use ExUnit.Case
 
+  test "to_simple_error with empty string" do
+    assert_raise ArgumentError, fn -> Redis.Protocol.to_simple_error("") end
+  end
+
+  test "to_simple_error with non-empty string" do
+    assert Redis.Protocol.to_simple_error("foo") == "-foo\r\n"
+  end
+
   test "to_simple_string with empty string" do
-    assert Redis.Protocol.to_simple_string("foo") == "+foo\r\n"
     assert_raise ArgumentError, fn -> Redis.Protocol.to_simple_string("") end
   end
 
