@@ -1,13 +1,6 @@
 defmodule Redis.Server do
-  @doc """
-  Listen for incoming connections
-  """
   def listen() do
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
     IO.puts("Logs from your program will appear here!")
-
-    # Since the tester restarts your program quite often, setting SO_REUSEADDR
-    # ensures that we don't run into 'Address already in use' errors
     {:ok, socket} = :gen_tcp.listen(6379, [:binary, active: false, reuseaddr: true])
     accept_connection(socket)
   end
@@ -51,50 +44,41 @@ defmodule Redis.Server do
     [{:bulk_string, key}] = args
     item = Redis.State.get(key)
 
-    if item == nil do
-      :gen_tcp.send(client, "$-1\r\n")
-    else
-      :gen_tcp.send(client, Redis.Protocol.to_bulk_string(item))
+    case item do
+      nil ->
+        :gen_tcp.send(client, "$-1\r\n")
+
+      {value, expiry} ->
+        if expiry == nil do
+          :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+        else
+          if :os.system_time(:millisecond) > expiry do
+            Redis.State.delete(key)
+            :gen_tcp.send(client, "$-1\r\n")
+          else
+            :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+          end
+        end
     end
-
-    # TODO: Rework this monstrosity
-    # if item == nil do
-    #   :gen_tcp.send(client, "$-1\r\n")
-    # else
-    #   {value, expiry} = item
-
-    #   if expiry == nil do
-    #     :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
-    #   else
-    #     if :os.system_time(:millisecond) > expiry do
-    #       Redis.State.delete(key)
-    #       :gen_tcp.send(client, "$-1\r\n")
-    #     else
-    #       :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
-    #     end
-    #   end
-    # end
   end
 
   def respond_to_command(client, "SET", args) do
-    [key_command, value_command] = args
-    # [key_command, value_command | options] = args
+    [key_command, value_command | options] = args
 
     key = elem(key_command, 1)
     value = elem(value_command, 1)
 
-    # entry =
-    #   case options do
-    #     [{:bulk_string, "px"}, {:bulk_string, expiry}] ->
-    #       {expiry, _} = Integer.parse(expiry)
-    #       {value, :os.system_time(:millisecond) + expiry}
+    entry =
+      case options do
+        [{:bulk_string, "px"}, {:bulk_string, expiry}] ->
+          {expiry, _} = Integer.parse(expiry)
+          {value, :os.system_time(:millisecond) + expiry}
 
-    #     _ ->
-    #       {value, nil}
-    #   end
+        _ ->
+          {value, nil}
+      end
 
-    Redis.State.set(key, value)
-    # Redis.State.set(key, {value, nil})
+    Redis.State.set(key, entry)
     :gen_tcp.send(client, Redis.Protocol.to_simple_string("OK"))
   end
 
