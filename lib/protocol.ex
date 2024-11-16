@@ -3,7 +3,7 @@ defmodule Redis.Protocol do
 
   def parse(data, commands) when data == "" do
     case Enum.reverse(commands) do
-      [{:array, length} | rest] -> Enum.take(rest, length)
+      [length | rest] -> Enum.take(rest, length)
       cmds -> cmds
     end
   end
@@ -15,7 +15,7 @@ defmodule Redis.Protocol do
   end
 
   def parse_command("+" <> command_value, args) do
-    {{:simple_string, command_value}, args}
+    {command_value, args}
   end
 
   def parse_command("$" <> command_value, args) do
@@ -23,12 +23,12 @@ defmodule Redis.Protocol do
     # Account for \r\n and -1 for 0-based index
     {value, rest} = String.split_at(args, length + 1)
     value = String.trim(value)
-    {{:bulk_string, value}, rest}
+    {value, rest}
   end
 
   def parse_command("*" <> command_value, args) do
     {length, _} = Integer.parse(command_value)
-    {{:array, length}, args}
+    {length, args}
   end
 
   def to_simple_error(value) do

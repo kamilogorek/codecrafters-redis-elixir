@@ -4,9 +4,9 @@ defmodule Redis.Server do
     accept_connection(socket)
   end
 
+  # TODO: Use `Task.Supervisor.start_child` instead
   def accept_connection(socket) do
     {:ok, client} = :gen_tcp.accept(socket)
-    # TODO: Use `Task.Supervisor.start_child` instead
     Supervisor.start_link([{Task, fn -> receive_packet(client) end}], strategy: :one_for_one)
     accept_connection(socket)
   end
@@ -15,7 +15,7 @@ defmodule Redis.Server do
     case :gen_tcp.recv(client, 0) do
       {:ok, data} ->
         IO.inspect("Data: #{data}")
-        [{_, command} | args] = Redis.Protocol.parse(data)
+        [command | args] = Redis.Protocol.parse(data)
         IO.inspect("Command: #{command}")
         respond_to_command(client, String.upcase(command), args)
         receive_packet(client)
@@ -33,17 +33,27 @@ defmodule Redis.Server do
     :gen_tcp.send(client, Redis.Protocol.to_simple_string("PONG"))
   end
 
-  def respond_to_command(client, "ECHO", args) do
-    [{:bulk_string, value}] = args
+  def respond_to_command(client, "ECHO", []) do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("ECHO command requires value parameter")
+    )
+  end
+
+  def respond_to_command(client, "ECHO", [value]) do
     IO.inspect("Responding to ECHO: #{value}")
     :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
   end
 
-  def respond_to_command(client, "GET", args) do
-    [{:bulk_string, key}] = args
-    item = Redis.State.get(key)
+  def respond_to_command(client, "GET", []) do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("GET command requires key parameter")
+    )
+  end
 
-    case item do
+  def respond_to_command(client, "GET", [key]) do
+    case Redis.State.get(key) do
       nil ->
         :gen_tcp.send(client, "$-1\r\n")
 
@@ -61,15 +71,17 @@ defmodule Redis.Server do
     end
   end
 
-  def respond_to_command(client, "SET", args) do
-    [key_command, value_command | options] = args
+  def respond_to_command(client, "SET", args) when length(args) < 2 do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("SET command requires key and value parameters")
+    )
+  end
 
-    key = elem(key_command, 1)
-    value = elem(value_command, 1)
-
+  def respond_to_command(client, "SET", [key, value | options]) do
     entry =
       case options do
-        [{:bulk_string, "px"}, {:bulk_string, expiry}] ->
+        ["px", expiry] ->
           {expiry, _} = Integer.parse(expiry)
           {value, :os.system_time(:millisecond) + expiry}
 
@@ -81,19 +93,37 @@ defmodule Redis.Server do
     :gen_tcp.send(client, Redis.Protocol.to_simple_string("OK"))
   end
 
-  def respond_to_command(client, "CONFIG", args) do
-    [{:bulk_string, subcommand}, {:bulk_string, key}] = args
+  def respond_to_command(client, "KEYS", []) do
+    :gen_tcp.send(client, Redis.Protocol.to_simple_error("KEYS command requires key parameter"))
+  end
 
+  def respond_to_command(client, "KEYS", ["*"]) do
+    :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array(Redis.State.keys()))
+  end
+
+  def respond_to_command(client, "KEYS", [key | _]) do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("KEYS command supports * key only. Provided key: #{key}")
+    )
+  end
+
+  def respond_to_command(client, "CONFIG", args) when length(args) < 2 do
+    :gen_tcp.send(client, Redis.Protocol.to_simple_error("CONFIG command requires subcommand"))
+  end
+
+  def respond_to_command(client, "CONFIG", [subcommand, key | _]) do
     case String.upcase(subcommand) do
       "GET" ->
         case :ets.lookup(:server_config, key) do
-          [{_, value} | _] ->
+          [{_, value}] ->
             :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array([key, value]))
 
           [] ->
-            err = "No config available for key #{key}"
-            IO.puts(err)
-            :gen_tcp.send(client, Redis.Protocol.to_simple_error(err))
+            :gen_tcp.send(
+              client,
+              Redis.Protocol.to_simple_error("No config available for key #{key}")
+            )
         end
 
       _ ->
