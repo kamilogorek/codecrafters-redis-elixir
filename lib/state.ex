@@ -81,16 +81,31 @@ defmodule Redis.State do
 
       # Hash table size, ignored for now
       0xFB ->
-        {:ok, _keys_size, rest} = parse_length(rest)
-        {:ok, _px_size, rest} = parse_length(rest)
+        {:ok, _, rest} = parse_length(rest)
+        {:ok, _, rest} = parse_length(rest)
         parse_body(rest, payload)
 
-      # Hash table size, ignored for now
+      # Key/value pair
       0x00 ->
         {key, rest} = parse_string(rest)
         {value, rest} = parse_string(rest)
-        # {value, expire}
-        payload = Map.put(payload, key, {value, nil})
+        payload = Map.put(payload, key, {value, :never})
+        parse_body(rest, payload)
+
+      # Key/value pair with expire in milliseconds
+      0xFC ->
+        <<exp::little-unsigned-integer-size(64), _::size(8), rest::binary>> = rest
+        {key, rest} = parse_string(rest)
+        {value, rest} = parse_string(rest)
+        payload = Map.put(payload, key, {value, exp})
+        parse_body(rest, payload)
+
+      # Key/value pair with expire in seconds
+      0xFD ->
+        <<exp::little-unsigned-integer-size(32), _::size(8), rest::binary>> = rest
+        {key, rest} = parse_string(rest)
+        {value, rest} = parse_string(rest)
+        payload = Map.put(payload, key, {value, exp * 1000})
         parse_body(rest, payload)
 
       # EOF

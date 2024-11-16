@@ -57,16 +57,15 @@ defmodule Redis.Server do
       nil ->
         :gen_tcp.send(client, "$-1\r\n")
 
+      {value, :never} ->
+        :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+
       {value, expiry} ->
-        if expiry == nil do
-          :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+        if :os.system_time(:millisecond) > expiry do
+          Redis.State.delete(key)
+          :gen_tcp.send(client, "$-1\r\n")
         else
-          if :os.system_time(:millisecond) > expiry do
-            Redis.State.delete(key)
-            :gen_tcp.send(client, "$-1\r\n")
-          else
-            :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
-          end
+          :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
         end
     end
   end
