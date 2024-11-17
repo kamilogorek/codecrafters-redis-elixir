@@ -57,16 +57,32 @@ defmodule Redis.Server do
       nil ->
         :gen_tcp.send(client, "$-1\r\n")
 
-      {value, :never} ->
-        :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+      entry ->
+        expiry = Map.get(entry, :expiry)
 
-      {value, expiry} ->
-        if :os.system_time(:millisecond) > expiry do
+        if expiry != nil && :os.system_time(:millisecond) > expiry do
           Redis.State.delete(key)
           :gen_tcp.send(client, "$-1\r\n")
         else
-          :gen_tcp.send(client, Redis.Protocol.to_bulk_string(value))
+          :gen_tcp.send(client, Redis.Protocol.to_bulk_string(Map.get(entry, :value)))
         end
+    end
+  end
+
+  def respond_to_command(client, "TYPE", []) do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("TYPE command requires key parameter")
+    )
+  end
+
+  def respond_to_command(client, "TYPE", [key]) do
+    case Redis.State.get(key) do
+      nil ->
+        :gen_tcp.send(client, Redis.Protocol.to_simple_string("none"))
+
+      entry ->
+        :gen_tcp.send(client, Redis.Protocol.to_simple_string(Map.get(entry, :type, "none")))
     end
   end
 
@@ -82,10 +98,10 @@ defmodule Redis.Server do
       case options do
         ["px", expiry] ->
           {expiry, _} = Integer.parse(expiry)
-          {value, :os.system_time(:millisecond) + expiry}
+          %{type: :string, value: value, expiry: :os.system_time(:millisecond) + expiry}
 
         _ ->
-          {value, nil}
+          %{type: :string, value: value}
       end
 
     Redis.State.set(key, entry)
