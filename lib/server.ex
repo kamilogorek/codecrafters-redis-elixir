@@ -108,6 +108,24 @@ defmodule Redis.Server do
     :gen_tcp.send(client, Redis.Protocol.to_simple_string("OK"))
   end
 
+  def respond_to_command(client, "XADD", []) do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("XADD command requires key parameters")
+    )
+  end
+
+  def respond_to_command(client, "XADD", [key, id | rest]) do
+    entry = %{
+      type: :stream,
+      id: id,
+      values: Enum.chunk_every(rest, 2, 2, :discard)
+    }
+
+    Redis.State.set(key, entry)
+    :gen_tcp.send(client, Redis.Protocol.to_bulk_string(id))
+  end
+
   def respond_to_command(client, "KEYS", []) do
     :gen_tcp.send(client, Redis.Protocol.to_simple_error("KEYS command requires key parameter"))
   end
