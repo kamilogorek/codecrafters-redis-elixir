@@ -55,4 +55,42 @@ defmodule Redis.Protocol do
     serialized_values = values |> Enum.map(&to_bulk_string/1) |> Enum.join("")
     "*#{length(values)}\r\n#{serialized_values}"
   end
+
+  def validate_stream_id(next_id, prev_id \\ nil) do
+    if prev_id == nil do
+      [next_time, next_seq] =
+        String.split(next_id, "-")
+        |> Enum.map(fn value ->
+          {val, _} = Integer.parse(value)
+          val
+        end)
+
+      cond do
+        next_time > 0 -> :ok
+        next_seq > 0 -> :ok
+        true -> :invalid
+      end
+    else
+      [next_time, next_seq] =
+        String.split(next_id, "-")
+        |> Enum.map(fn value ->
+          {val, _} = Integer.parse(value)
+          val
+        end)
+
+      [prev_time, prev_seq] =
+        String.split(prev_id, "-")
+        |> Enum.map(fn value ->
+          {val, _} = Integer.parse(value)
+          val
+        end)
+
+      cond do
+        next_time > prev_time -> :ok
+        next_time == prev_time && next_seq > prev_seq -> :ok
+        next_time == 0 && next_seq == 0 -> :invalid
+        true -> :too_small
+      end
+    end
+  end
 end

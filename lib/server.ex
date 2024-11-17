@@ -115,15 +115,78 @@ defmodule Redis.Server do
     )
   end
 
+  # TODO: Simplify this
   def respond_to_command(client, "XADD", [key, id | rest]) do
-    entry = %{
-      type: :stream,
-      id: id,
-      values: Enum.chunk_every(rest, 2, 2, :discard)
-    }
+    case Redis.State.get(key) do
+      nil ->
+        case Redis.Protocol.validate_stream_id(id) do
+          :ok ->
+            Redis.State.set(key, %{
+              type: :stream,
+              entries: [
+                %{
+                  id: id,
+                  values: Enum.chunk_every(rest, 2, 2, :discard)
+                }
+              ]
+            })
 
-    Redis.State.set(key, entry)
-    :gen_tcp.send(client, Redis.Protocol.to_bulk_string(id))
+            :gen_tcp.send(client, Redis.Protocol.to_bulk_string(id))
+
+          :invalid ->
+            :gen_tcp.send(
+              client,
+              Redis.Protocol.to_simple_error(
+                "ERR The ID specified in XADD must be greater than 0-0"
+              )
+            )
+
+          :too_small ->
+            :gen_tcp.send(
+              client,
+              Redis.Protocol.to_simple_error(
+                "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+              )
+            )
+        end
+
+      existing_entry ->
+        prev_id = Map.get(existing_entry, :entries) |> List.first(%{id: nil}) |> Map.get(:id)
+
+        case Redis.Protocol.validate_stream_id(id, prev_id) do
+          :ok ->
+            entries = Map.get(existing_entry, :entries, [])
+
+            Redis.State.set(key, %{
+              existing_entry
+              | entries: [
+                  %{
+                    id: id,
+                    values: Enum.chunk_every(rest, 2, 2, :discard)
+                  }
+                  | entries
+                ]
+            })
+
+            :gen_tcp.send(client, Redis.Protocol.to_bulk_string(id))
+
+          :invalid ->
+            :gen_tcp.send(
+              client,
+              Redis.Protocol.to_simple_error(
+                "ERR The ID specified in XADD must be greater than 0-0"
+              )
+            )
+
+          :too_small ->
+            :gen_tcp.send(
+              client,
+              Redis.Protocol.to_simple_error(
+                "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+              )
+            )
+        end
+    end
   end
 
   def respond_to_command(client, "KEYS", []) do
