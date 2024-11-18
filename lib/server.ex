@@ -192,16 +192,20 @@ defmodule Redis.Server do
 
     entries = Map.get(state_value, :entries, []) |> Enum.reverse()
 
-    IO.inspect(entries)
-
     start_index =
-      Enum.find_index(entries, fn entry ->
-        [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
-        [start_time, start_seq] = Redis.Protocol.parse_stream_id(start_id)
-        IO.inspect({entry_time, entry_seq})
-        IO.inspect({start_time, start_seq})
-        start_time >= entry_time && start_seq <= entry_seq
-      end)
+      case start_id do
+        "-" ->
+          0
+
+        _ ->
+          Enum.find_index(entries, fn entry ->
+            [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
+            [start_time, start_seq] = Redis.Protocol.parse_stream_id(start_id)
+            IO.inspect({entry_time, entry_seq})
+            IO.inspect({start_time, start_seq})
+            start_time >= entry_time && start_seq <= entry_seq
+          end)
+      end
 
     case start_index do
       nil ->
