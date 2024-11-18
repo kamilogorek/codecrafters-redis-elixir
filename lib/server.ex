@@ -212,14 +212,21 @@ defmodule Redis.Server do
         :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array([]))
 
       _ ->
+        {_, tail} = Enum.split(entries, start_index)
+
         matched_entries =
-          Enum.split(entries, start_index)
-          |> elem(1)
-          |> Enum.take_while(fn entry ->
-            [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
-            [end_time, end_seq] = Redis.Protocol.parse_stream_id(end_id)
-            end_time >= entry_time && end_seq >= entry_seq
-          end)
+          case end_id do
+            "+" ->
+              tail
+
+            _ ->
+              tail
+              |> Enum.take_while(fn entry ->
+                [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
+                [end_time, end_seq] = Redis.Protocol.parse_stream_id(end_id)
+                end_time >= entry_time && end_seq >= entry_seq
+              end)
+          end
           |> Enum.map(fn entry -> [entry[:id], entry[:values]] end)
 
         :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array(matched_entries))
