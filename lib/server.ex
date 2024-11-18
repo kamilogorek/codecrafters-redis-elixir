@@ -118,7 +118,7 @@ defmodule Redis.Server do
     )
   end
 
-  def respond_to_command(client, "XADD", [key, id | rest]) do
+  def respond_to_command(client, "XADD", [key, id | values]) do
     state_value =
       Redis.State.get(key, %{
         type: :stream,
@@ -152,7 +152,7 @@ defmodule Redis.Server do
           | entries: [
               %{
                 id: next_id,
-                values: Enum.chunk_every(rest, 2, 2, :discard)
+                values: values
               }
               | old_entries
             ]
@@ -173,6 +173,52 @@ defmodule Redis.Server do
             "ERR The ID specified in XADD is equal or smaller than the target stream top item"
           )
         )
+    end
+  end
+
+  def respond_to_command(client, "XRANGE", args) when length(args) < 3 do
+    :gen_tcp.send(
+      client,
+      Redis.Protocol.to_simple_error("XRANGE command requires key, start and end parameters")
+    )
+  end
+
+  def respond_to_command(client, "XRANGE", [key, start_id, end_id]) do
+    state_value =
+      Redis.State.get(key, %{
+        type: :stream,
+        entries: []
+      })
+
+    entries = Map.get(state_value, :entries, []) |> Enum.reverse()
+
+    IO.inspect(entries)
+
+    start_index =
+      Enum.find_index(entries, fn entry ->
+        [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
+        [start_time, start_seq] = Redis.Protocol.parse_stream_id(start_id)
+        IO.inspect({entry_time, entry_seq})
+        IO.inspect({start_time, start_seq})
+        start_time >= entry_time && start_seq <= entry_seq
+      end)
+
+    case start_index do
+      nil ->
+        :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array([]))
+
+      _ ->
+        matched_entries =
+          Enum.split(entries, start_index)
+          |> elem(1)
+          |> Enum.take_while(fn entry ->
+            [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
+            [end_time, end_seq] = Redis.Protocol.parse_stream_id(end_id)
+            end_time >= entry_time && end_seq >= entry_seq
+          end)
+          |> Enum.map(fn entry -> [entry[:id], entry[:values]] end)
+
+        :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array(matched_entries))
     end
   end
 

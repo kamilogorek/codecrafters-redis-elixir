@@ -52,7 +52,17 @@ defmodule Redis.Protocol do
   end
 
   def to_bulk_string_array(values) do
-    serialized_values = values |> Enum.map(&to_bulk_string/1) |> Enum.join("")
+    serialized_values =
+      values
+      |> Enum.map(fn value ->
+        if is_list(value) do
+          to_bulk_string_array(value)
+        else
+          to_bulk_string(value)
+        end
+      end)
+      |> Enum.join("")
+
     "*#{length(values)}\r\n#{serialized_values}"
   end
 
@@ -64,12 +74,7 @@ defmodule Redis.Protocol do
         {:ok, "#{system_time}-0"}
 
       _ ->
-        [prev_time, prev_seq] =
-          String.split(prev_id, "-")
-          |> Enum.map(fn value ->
-            {val, _} = Integer.parse(value)
-            val
-          end)
+        [prev_time, prev_seq] = parse_stream_id(prev_id)
 
         case system_time > prev_time do
           true -> {:ok, "#{system_time}-0"}
@@ -87,12 +92,7 @@ defmodule Redis.Protocol do
         _ -> {:ok, "#{next_time}-0"}
       end
     else
-      [prev_time, prev_seq] =
-        String.split(prev_id, "-")
-        |> Enum.map(fn value ->
-          {val, _} = Integer.parse(value)
-          val
-        end)
+      [prev_time, prev_seq] = parse_stream_id(prev_id)
 
       case next_time > prev_time do
         true -> validate_stream_id("#{next_time}-0", prev_id)
@@ -107,12 +107,7 @@ defmodule Redis.Protocol do
 
   def validate_stream_id(next_id, prev_id \\ nil) do
     if prev_id == nil do
-      [next_time, next_seq] =
-        String.split(next_id, "-")
-        |> Enum.map(fn value ->
-          {val, _} = Integer.parse(value)
-          val
-        end)
+      [next_time, next_seq] = parse_stream_id(next_id)
 
       cond do
         next_time > 0 -> {:ok, next_id}
@@ -120,19 +115,8 @@ defmodule Redis.Protocol do
         true -> {:invalid, nil}
       end
     else
-      [next_time, next_seq] =
-        String.split(next_id, "-")
-        |> Enum.map(fn value ->
-          {val, _} = Integer.parse(value)
-          val
-        end)
-
-      [prev_time, prev_seq] =
-        String.split(prev_id, "-")
-        |> Enum.map(fn value ->
-          {val, _} = Integer.parse(value)
-          val
-        end)
+      [next_time, next_seq] = parse_stream_id(next_id)
+      [prev_time, prev_seq] = parse_stream_id(prev_id)
 
       cond do
         next_time > prev_time -> {:ok, next_id}
@@ -141,5 +125,14 @@ defmodule Redis.Protocol do
         true -> {:too_small, nil}
       end
     end
+  end
+
+  def parse_stream_id(id) do
+    id
+    |> String.split("-")
+    |> Enum.map(fn value ->
+      {val, _} = Integer.parse(value)
+      val
+    end)
   end
 end

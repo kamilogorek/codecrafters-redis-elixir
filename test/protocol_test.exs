@@ -38,6 +38,11 @@ defmodule ProtocolTest do
              "*2\r\n$3\r\nfoo\r\n$5\r\nlorem\r\n"
   end
 
+  test "to_bulk_string_array with nested arrays of bulk strings" do
+    assert Redis.Protocol.to_bulk_string_array([["foo", "bar"], ["baz"]]) ==
+             "*2\r\n*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n*1\r\n$3\r\nbaz\r\n"
+  end
+
   test "explicit_stream_id valid id without previous id" do
     assert Redis.Protocol.explicit_stream_id("0-1") == {:ok, "0-1"}
     assert Redis.Protocol.explicit_stream_id("1-1") == {:ok, "1-1"}
