@@ -238,42 +238,53 @@ defmodule Redis.Server do
     )
   end
 
-  def respond_to_command(client, "XREAD", [_streams, key, start_id]) do
-    state_value =
-      Redis.State.get(key, %{
-        type: :stream,
-        entries: []
-      })
+  def respond_to_command(client, "XREAD", [_subcommand | streams]) do
+    pairs_count = div(length(streams), 2)
 
-    entries = Map.get(state_value, :entries, []) |> Enum.reverse()
+    streams =
+      0..(pairs_count - 1)
+      |> Enum.map(fn n ->
+        {_, tail} = Enum.split(streams, n)
+        [key, start_id] = Enum.take_every(tail, pairs_count)
 
-    start_index =
-      Enum.find_index(entries, fn entry ->
-        [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
-        [start_time, start_seq] = Redis.Protocol.parse_stream_id(start_id)
-        start_time >= entry_time && start_seq <= entry_seq
+        state_value =
+          Redis.State.get(key, %{
+            type: :stream,
+            entries: []
+          })
+
+        entries = Map.get(state_value, :entries, []) |> Enum.reverse()
+
+        start_index =
+          Enum.find_index(entries, fn entry ->
+            [entry_time, entry_seq] = Redis.Protocol.parse_stream_id(entry[:id])
+            [start_time, start_seq] = Redis.Protocol.parse_stream_id(start_id)
+            start_time >= entry_time && entry_seq > start_seq
+          end)
+
+        case start_index do
+          nil ->
+            []
+
+          _ ->
+            # `XREAD` is exclusive, so +1
+            start_index =
+              case start_id do
+                "0-0" -> 0
+                _ -> start_index
+              end
+
+            {_, tail} = Enum.split(entries, start_index)
+
+            matched_entries =
+              tail
+              |> Enum.map(fn entry -> [entry[:id], entry[:values]] end)
+
+            [key, matched_entries]
+        end
       end)
 
-    case start_index do
-      nil ->
-        :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array([]))
-
-      _ ->
-        # `XREAD` is exclusive, so +1
-        start_index =
-          case start_id do
-            "0-0" -> 0
-            _ -> start_index + 1
-          end
-
-        {_, tail} = Enum.split(entries, start_index)
-
-        matched_entries =
-          tail
-          |> Enum.map(fn entry -> [entry[:id], entry[:values]] end)
-
-        :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array([[key, matched_entries]]))
-    end
+    :gen_tcp.send(client, Redis.Protocol.to_bulk_string_array(streams))
   end
 
   def respond_to_command(client, "KEYS", []) do
